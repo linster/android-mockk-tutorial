@@ -54,6 +54,14 @@ fun GreetingPreview() {
     }
 }
 
+//TODO composable that takes in data as paremeters
+
+//TODO compsable that emits events of button clicks
+
+//TODO composable that holds everything and takes in a repository as a parameter
+
+
+
 
 class MainActivityViewModel : ViewModel() {
 
@@ -73,19 +81,20 @@ class PrimaryRepository @Inject constructor(
 
     fun prepareFlakeyData() : Flow<FlakeyFlowResult> {
         return secondaryRepository.flakeyFlow()
+            .map { FlakeyFlowResult.Ok(it) as FlakeyFlowResult }
             .catch {
                 if (it is TertiaryRepository.FlakeyFlowException) {
                     emit(FlakeyFlowResult.Failed(it))
                 }
             }
-            .map { FlakeyFlowResult.Ok(it) }
     }
 
     //We can test with a real secondary repository, or we can go nuts and mock it very deeply.
     suspend fun oneShot() = secondaryRepository.oneShot()
 
+    fun coldFlow() = secondaryRepository.coldFlow()
 
-
+    fun coldFlowWithStart(start : Int) : Flow<Int> = secondaryRepository.coldFlowWithStart(start)
 }
 
 class SecondaryRepository @Inject constructor(
@@ -100,6 +109,9 @@ class SecondaryRepository @Inject constructor(
         return tertiaryRepository.makeFlakey(coldFlow()) { it.rem(2) == 0 }
     }
 
+    //We can test we call the function correctly. (Argument Captor)
+    fun coldFlowWithStart(start : Int) : Flow<Int> = tertiaryRepository.coldFlowWithStart(start)
+
 }
 
 class TertiaryRepository @Inject constructor() {
@@ -107,7 +119,10 @@ class TertiaryRepository @Inject constructor() {
     @VisibleForTesting
     var oneShotState = 1
 
-    suspend fun oneShot() : String = (oneShotState++).toString()
+    suspend fun oneShot() : String {
+        delay(40_000)
+        return (oneShotState++).toString()
+    }
 
     fun coldFlow() : Flow<Int> {
         return flow {
@@ -116,6 +131,11 @@ class TertiaryRepository @Inject constructor() {
                 emit(it)
             }
         }
+    }
+
+    //We can use this to test an argument captor
+    fun coldFlowWithStart(start : Int) : Flow<Int> {
+        return flow { (start .. 100).map { delay(1000) ; emit(it) }}
     }
 
     fun flowWithState() : Flow<Int> {

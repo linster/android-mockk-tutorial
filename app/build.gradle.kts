@@ -54,6 +54,7 @@ dependencies {
 
 
     implementation("com.google.dagger:hilt-android:2.44")
+    testImplementation("junit:junit:4.12")
     kapt("com.google.dagger:hilt-android-compiler:2.44")
 
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.6.1")
