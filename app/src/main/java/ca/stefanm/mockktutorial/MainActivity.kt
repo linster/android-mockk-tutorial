@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -22,6 +23,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.lifecycle.ViewModel
 import ca.stefanm.mockktutorial.ui.theme.MockKTutorialTheme
+import dagger.hilt.EntryPoint
+import dagger.hilt.android.AndroidEntryPoint
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -29,10 +33,12 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
     @Inject
@@ -75,7 +81,7 @@ fun DataButtons(
     onCancelFlows : () -> Unit = {}
 ) {
 
-    Column {
+    Card {
         Button(onClick = { onCallOneShot() }) {
             Text("Call one-shot")
         }
@@ -129,21 +135,23 @@ fun MainScreen(
             primaryRepository.prepareFlakeyData().collect { value = it }
         }, key1 = flakeyResultValueRestartToggler.value)
 
-        DataButtons(
-            onCallOneShot = {},
-            onColdFlow = { coldFlowValueRestartToggler.value = !coldFlowValueRestartToggler.value },
-            onColdFlowWithStart = { start -> startVal.value = start },
-            onCallPrepareFlakeyData = { flakeyResultValueRestartToggler.value = !flakeyResultValueRestartToggler.value }
-        )
-
+        
         val scope = rememberCoroutineScope()
         val oneShotToggler = remember { mutableStateOf(false) }
         val oneShotState = remember {
             mutableStateOf("noOneShot")
         }
-        val oneShotEffect = LaunchedEffect(oneShotToggler.value) {
+        LaunchedEffect(oneShotToggler.value) {
             oneShotState.value = scope.async { primaryRepository.oneShot() }.await()
         }
+
+        DataButtons(
+            onCallOneShot = {oneShotToggler.value = !oneShotToggler.value },
+            onColdFlow = { coldFlowValueRestartToggler.value = !coldFlowValueRestartToggler.value },
+            onColdFlowWithStart = { start -> startVal.value = start },
+            onCallPrepareFlakeyData = { flakeyResultValueRestartToggler.value = !flakeyResultValueRestartToggler.value }
+        )
+
         DataDisplay(
             oneShotValue = oneShotState.value,
             coldFlowValue = coldFlowValue.value,
@@ -170,6 +178,13 @@ class PrimaryRepository @Inject constructor(
     fun prepareFlakeyData() : Flow<FlakeyFlowResult> {
         return secondaryRepository.flakeyFlow()
             .map { FlakeyFlowResult.Ok(it) as FlakeyFlowResult }
+            .retryWhen { cause, attempt ->
+
+                //TODO in the session, let's try making this flow keep going when there's
+                //TODO a failure. But first, write a test to show that we actually get three OK(1) emissions
+                cause is TertiaryRepository.FlakeyFlowException && attempt < 3
+
+            }
             .catch {
                 if (it is TertiaryRepository.FlakeyFlowException) {
                     emit(FlakeyFlowResult.Failed(it))
@@ -231,7 +246,7 @@ class TertiaryRepository @Inject constructor() {
     }
 
     data class FlakeyFlowException(val value : Int) : Throwable("Flow was flakey for reasons on event $value")
-    fun Flow<Int>.makeFlakey(failWhen : (upstream : Int) -> Boolean) : Flow<Int> {
+    fun Flow<Int>.makeFlakeyExt(failWhen : (upstream : Int) -> Boolean) : Flow<Int> {
         return this.transformLatest {
             if (failWhen(it)) {
                 throw FlakeyFlowException(it)
@@ -241,5 +256,5 @@ class TertiaryRepository @Inject constructor() {
         }
     }
 
-    fun makeFlakey(upstream: Flow<Int>, failWhen: (upstream: Int) -> Boolean) = upstream.makeFlakey(failWhen)
+    fun makeFlakey(upstream: Flow<Int>, failWhen: (upstream: Int) -> Boolean) = upstream.makeFlakeyExt(failWhen)
 }
