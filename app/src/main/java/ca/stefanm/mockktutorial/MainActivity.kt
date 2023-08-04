@@ -135,7 +135,7 @@ fun MainScreen(
             primaryRepository.prepareFlakeyData().collect { value = it }
         }, key1 = flakeyResultValueRestartToggler.value)
 
-        
+
         val scope = rememberCoroutineScope()
         val oneShotToggler = remember { mutableStateOf(false) }
         val oneShotState = remember {
