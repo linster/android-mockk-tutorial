@@ -4,66 +4,153 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.annotation.VisibleForTesting
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.lifecycle.ViewModel
 import ca.stefanm.mockktutorial.ui.theme.MockKTutorialTheme
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.transformLatest
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 class MainActivity : ComponentActivity() {
+
+    @Inject
+    lateinit var primaryRepository: PrimaryRepository
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             MockKTutorialTheme {
                 // A surface container using the 'background' color from the theme
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    Greeting("Android")
+                    MainScreen(primaryRepository = primaryRepository)
                 }
             }
         }
     }
 }
 
-
-
-
 @Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-    Text(
-            text = "Hello $name!",
-            modifier = modifier
-    )
-}
-
-@Preview(showBackground = true)
-@Composable
-fun GreetingPreview() {
-    MockKTutorialTheme {
-        Greeting("Android")
+fun DataDisplay(
+    oneShotValue : String,
+    coldFlowValue : Int,
+    coldFlowWithStartValue : Int,
+    flakeyResultValue : PrimaryRepository.FlakeyFlowResult,
+) {
+    Column {
+        Text(text = "OneShotValue: $oneShotValue")
+        Text(text = "ColdFlowValue: $coldFlowValue")
+        Text(text = "ColdFlowWithStartValue: $coldFlowWithStartValue")
+        Text(text = "FlakeyResultValue: ${flakeyResultValue.toString()}")
     }
 }
 
-//TODO composable that takes in data as paremeters
+@Composable
+fun DataButtons(
+    onCallOneShot : () -> Unit = {},
+    onCallPrepareFlakeyData : () -> Unit = {},
+    onColdFlow : () -> Unit = {},
+    onColdFlowWithStart : (start : Int) -> Unit = {},
+    onCancelFlows : () -> Unit = {}
+) {
 
-//TODO compsable that emits events of button clicks
+    Column {
+        Button(onClick = { onCallOneShot() }) {
+            Text("Call one-shot")
+        }
 
-//TODO composable that holds everything and takes in a repository as a parameter
+        Button(onClick = { onCallPrepareFlakeyData() }) {
+            Text("Prepare Flakey Data")
+        }
 
+        Button(onClick = { onColdFlow() }) {
+            Text("Cold Flow")
+        }
 
+        val start = remember { mutableStateOf(0) }
+        Text(text = "Cold Flow With Start: ${start.value}")
 
+        Row {
+            Button(onClick = { start.value = start.value - 1 }) { Text(text = "Start --") }
+            Button(onClick = { start.value = 0 }) { Text(text = "Start = 0") }
+            Button(onClick = { start.value = start.value + 1 }) { Text(text = "Start ++") }
+        }
 
-class MainActivityViewModel : ViewModel() {
+        Button(onClick = { onColdFlowWithStart(start.value) }) {
+            Text(text = "Cold flow with start")
+        }
+
+        Button(onClick = { onCancelFlows() }) {
+            Text("Cancel flows")
+        }
+    }
+}
+
+@Composable
+fun MainScreen(
+    primaryRepository : PrimaryRepository
+) {
+
+    Column {
+
+        val startVal = remember { mutableStateOf(0) }
+        val coldFlowWithStartValue = produceState(initialValue = -1, producer = {
+            primaryRepository.coldFlowWithStart(startVal.value).collect { value = it }
+        }, key1 = startVal.value)
+
+        val coldFlowValueRestartToggler = remember { mutableStateOf(true) }
+        val coldFlowValue = produceState(initialValue = -1, producer = {
+           primaryRepository.coldFlow().collect { value = it }
+        }, key1 = coldFlowValueRestartToggler.value)
+
+        val flakeyResultValueRestartToggler = remember { mutableStateOf(true) }
+        val flakeyResultValue = produceState(initialValue = PrimaryRepository.FlakeyFlowResult.NoData as PrimaryRepository.FlakeyFlowResult, producer = {
+            primaryRepository.prepareFlakeyData().collect { value = it }
+        }, key1 = flakeyResultValueRestartToggler.value)
+
+        DataButtons(
+            onCallOneShot = {},
+            onColdFlow = { coldFlowValueRestartToggler.value = !coldFlowValueRestartToggler.value },
+            onColdFlowWithStart = { start -> startVal.value = start },
+            onCallPrepareFlakeyData = { flakeyResultValueRestartToggler.value = !flakeyResultValueRestartToggler.value }
+        )
+
+        val scope = rememberCoroutineScope()
+        val oneShotToggler = remember { mutableStateOf(false) }
+        val oneShotState = remember {
+            mutableStateOf("noOneShot")
+        }
+        val oneShotEffect = LaunchedEffect(oneShotToggler.value) {
+            oneShotState.value = scope.async { primaryRepository.oneShot() }.await()
+        }
+        DataDisplay(
+            oneShotValue = oneShotState.value,
+            coldFlowValue = coldFlowValue.value,
+            coldFlowWithStartValue = coldFlowWithStartValue.value,
+            flakeyResultValue = flakeyResultValue.value
+        )
+    }
 
 }
 
@@ -75,6 +162,7 @@ class PrimaryRepository @Inject constructor(
 
     sealed interface FlakeyFlowResult {
         data class Ok(val value : Int) : FlakeyFlowResult
+        object NoData : FlakeyFlowResult
         data class Failed(val cause : Throwable) : FlakeyFlowResult
     }
 
